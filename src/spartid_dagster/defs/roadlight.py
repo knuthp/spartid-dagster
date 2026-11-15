@@ -17,11 +17,11 @@ ARCGIS_IDS = {
     "lier": "482b9ef4172a4a4d86518367d9ef8c8d", # Not returning anything. Needs investigation
     "lillestroem": "01c62103540a41338498506ec433b15b",
     "nesodden": "26a87659174d421ab8b0809dd2b746ba", # Not active and listed as Venus muncipal
-    "nordre_follo": "dc12372c0a514bd585387e398b023c8d", # Requires sign in
+    "nordre_follo": "dc12372c0a514bd585387e398b023c8d", # Requires sign in, but has moved to objector.io
 
 }
 
-@dg.asset(partitions_def=municipality_partitions)
+@dg.asset(partitions_def=municipality_partitions, group_name="RoadLight")
 def road_lights(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     """Scrapes ArcGIS data and returns the path to the saved data"""
     where = context.partition_key
@@ -126,6 +126,7 @@ def road_lights(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
 @dg.asset(
     deps=[road_lights],
     partitions_def=municipality_partitions,
+    group_name="RoadLight",
 )
 def upload_hf_bucket(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         """
@@ -165,3 +166,22 @@ def upload_hf_bucket(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         except Exception as e:
             context.log.error(f"Failed to upload to Hugging Face: {str(e)}")
             raise Failure(f"Upload failed: {e}")
+
+roadlights_job = dg.define_asset_job(
+    name="roadlights_job",
+    selection=dg.AssetSelection.assets(road_lights, upload_hf_bucket),
+    description="Pull road light data and status"
+)
+
+@dg.schedule(
+    job=roadlights_job,
+    cron_schedule="0 6 * * *",  # Runs daily at 06:00
+    execution_timezone="Europe/Oslo",
+)
+def daily_roadlight_schedule(context: dg.ScheduleEvaluationContext):
+    """Pull data and status for road light (veglys) once a day."""
+    for partition_key in municipality_partitions.get_partition_keys():
+        yield dg.RunRequest(
+            run_key=f"{partition_key}_{context.scheduled_execution_time.strftime('%Y-%m-%d')}",
+            partition_key=partition_key,
+        )
