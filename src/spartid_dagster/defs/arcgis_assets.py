@@ -1,3 +1,4 @@
+from pathlib import Path
 import pandas as pd
 import dagster as dg
 import requests
@@ -8,15 +9,18 @@ from huggingface_hub import HfApi
 
 from datetime import datetime
 
-@dg.asset
+municipality_partitions = dg.StaticPartitionsDefinition(["asker", "baerum"])
+# 2. Map the keys to your actual ArcGIS IDs
+ARCGIS_IDS = {
+    "asker": "20016755948d419a8a497115440bd2d1",
+    "baerum": "5977d524cd884257bd26623ada5599e9",
+}
+
+@dg.asset(partitions_def=municipality_partitions)
 def road_lights(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
     """Scrapes ArcGIS data and returns the path to the saved data"""
-    locations = {
-        "asker" : "20016755948d419a8a497115440bd2d1"
-    }
-    where = "asker"
-    app_id = locations[where]
-
+    where = context.partition_key
+    app_id = ARCGIS_IDS[where]
     config_url = f"https://www.arcgis.com/sharing/rest/content/items/{app_id}/data?f=json"
 
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -55,7 +59,7 @@ def road_lights(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
 
     # 3. Query Feature Layers with full pagination (No Capping)
     all_records = []
-    BATCH_SIZE = 2000
+    BATCH_SIZE = 1000
 
     for layer_url in feature_layer_urls:
         query_url = layer_url if layer_url.endswith("/query") else f"{layer_url}/query"
@@ -108,22 +112,23 @@ def road_lights(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         df = pd.DataFrame(all_records)
         context.log.info(f"DataFrame shape: {df.shape[0]} rows, {df.shape[1]} columns")
 
-        # Optional CSV backup
         today = datetime.now().strftime("%Y-%m-%d")
-        dst = f"/tmp/road_light_{where}_{today}.csv"
-        df.to_csv(dst, index=False)
+        dst = Path("/tmp") / where / f"rls_{today}.parquet"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(dst, index=False)
 
 
 @dg.asset(
-    deps=[road_lights]
+    deps=[road_lights],
+    partitions_def=municipality_partitions,
 )
 def upload_hf_bucket(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         """
-        Reads /tmp/road_light.csv and uploads it to the Hugging Face dataset repository.
+        Reads /tmp/<where>/rls_<date>.csv and uploads it to the Hugging Face buckets.
         """
-        where = "asker"
+        where = context.partition_key
         today = datetime.now().strftime("%Y-%m-%d")
-        path_in_repo = f"road_light_{where}_{today}.csv"     # The name the file will have in HF
+        path_in_repo = f"{where}/rls_{today}.parquet"     # The name the file will have in HF
         file_path = f"/tmp/{path_in_repo}"
         repo_id = "knuthp/roadlightstatus"  # Assuming this is a dataset repo
 
@@ -143,14 +148,6 @@ def upload_hf_bucket(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
             context.log.info(f"Starting upload of {file_path} to HF repo {repo_id}...")
             api = HfApi(token=token)
 
-            # 3. Upload the file
-            # This will create the repo if it doesn't exist, or simply upload to it if it does.
-            # api.upload_file(
-            #     path_or_fileobj=file_path,
-            #     path_in_repo=path_in_repo,
-            #     repo_id=repo_id,
-            #     repo_type="bucket",  # Change to "model" if it's a model repo
-            # )
             api.batch_bucket_files(
                 bucket_id=repo_id,
                 add=[
