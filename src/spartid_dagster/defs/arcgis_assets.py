@@ -9,11 +9,16 @@ from huggingface_hub import HfApi
 
 from datetime import datetime
 
-municipality_partitions = dg.StaticPartitionsDefinition(["asker", "baerum"])
+municipality_partitions = dg.StaticPartitionsDefinition(["asker", "baerum", "lillestroem"])
 # 2. Map the keys to your actual ArcGIS IDs
 ARCGIS_IDS = {
     "asker": "20016755948d419a8a497115440bd2d1",
     "baerum": "5977d524cd884257bd26623ada5599e9",
+    "lier": "482b9ef4172a4a4d86518367d9ef8c8d", # Not returning anything. Needs investigation
+    "lillestroem": "01c62103540a41338498506ec433b15b",
+    "nesodden": "26a87659174d421ab8b0809dd2b746ba", # Not active and listed as Venus muncipal
+    "nordre_follo": "dc12372c0a514bd585387e398b023c8d", # Requires sign in
+
 }
 
 @dg.asset(partitions_def=municipality_partitions)
