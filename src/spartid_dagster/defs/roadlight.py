@@ -160,8 +160,8 @@ def upload_hf_bucket(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
                     (file_path, path_in_repo)
                 ],
             )
-            context.log.info(f"Successfully uploaded {file_path} to https://huggingface.co/datasets/{repo_id}")
-            return f"https://huggingface.co/datasets/{repo_id}/{path_in_repo}"
+            context.log.info(f"Successfully uploaded {file_path} to https://huggingface.co/buckets/{repo_id}")
+            return f"https://huggingface.co/buckets/{repo_id}/{path_in_repo}"
 
         except Exception as e:
             context.log.error(f"Failed to upload to Hugging Face: {str(e)}")
