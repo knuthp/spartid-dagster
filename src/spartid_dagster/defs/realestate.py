@@ -16,11 +16,11 @@ monthly_partitions = dg.MonthlyPartitionsDefinition(
     timezone="Europe/Oslo"
 )
 
-newspaper_partitions = dg.StaticPartitionsDefinition(["budsti", "smaalenene"])
+newspaper_partitions = dg.StaticPartitionsDefinition(["budsti", "smaalenene", "laagen", "dramti", "avisao", ])
 
 multi_partitions_def = dg.MultiPartitionsDefinition({
     "month": monthly_partitions,
-    "newspaper": municipality_partitions,
+    "newspaper": newspaper_partitions,
 })
 
 FIELDS = (
@@ -40,7 +40,7 @@ def build_params(start_date, end_date, newspaper) -> dict[str, str]:
     return {
         "greaterThanOrEqual": f"date:{start_date}",
         "lessThan": f"date:{end_date}",
-        "limit": "100",
+        "limit": "9999",
         "sortBy": "date",
         "sortDirection": "desc",
         "fields": FIELDS,
@@ -115,29 +115,33 @@ def process_and_save_data(data, postfix: str, newspaper: str):
     print(f"Saved flattened dataset to '{parquet_filename}' ({len(df)} rows)")
 
 
-@dg.asset(partitions_def=monthly_partitions, group_name="RealEstate")
+@dg.asset(partitions_def=multi_partitions_def, group_name="RealEstate")
 def fetch_amedia_property(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
+    partition_keys = context.partition_key.keys_by_dimension
+    newspaper = partition_keys["newspaper"]
     time_window = context.partition_time_window
     date_pattern = "%Y-%m-%d"
     start_date = time_window.start.strftime(date_pattern)
     end_date = time_window.end.strftime(date_pattern)
     context.log.info(f"Starting to fetch {start_date} to {end_date}")
-    newspaper = "smaalenene"
     raw_data = fetch_property_data(start_date, end_date, newspaper)
-    if raw_data:
-        process_and_save_data(raw_data, start_date[:-3], newspaper)
+    if not raw_data:
+        raise Exception(f"No data returned for {newspaper} from {start_date} to {end_date}")
+    process_and_save_data(raw_data, start_date[:-3], newspaper)
 
 
 @dg.asset(
     deps=[fetch_amedia_property],
-    partitions_def=monthly_partitions,
+    partitions_def=multi_partitions_def,
     group_name="RealEstate",
 )
 def upload_re_hf_bucket(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
+    partition_keys = context.partition_key.keys_by_dimension
+    newspaper = partition_keys["newspaper"]
     time_window = context.partition_time_window
     date_pattern = "%Y-%m"
     postfix = time_window.start.strftime(date_pattern)
-    newspaper = "budsti"
+
     path_in_repo = f"{newspaper}/re_{postfix}.parquet"     # The name the file will have in HF
     file_path = f"/tmp/{path_in_repo}"
     repo_id = "knuthp/realestate"
