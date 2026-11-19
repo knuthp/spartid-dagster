@@ -16,7 +16,7 @@ monthly_partitions = dg.MonthlyPartitionsDefinition(
     timezone="Europe/Oslo"
 )
 
-newspaper_partitions = dg.StaticPartitionsDefinition(["budsti", "smaalenene", "laagen", "dramti", "avisao", ])
+newspaper_partitions = dg.StaticPartitionsDefinition(["budsti", "smaale", "laagen", "dramti", "avisao", ])
 
 multi_partitions_def = dg.MultiPartitionsDefinition({
     "month": monthly_partitions,
@@ -128,6 +128,10 @@ def fetch_amedia_property(context: dg.AssetExecutionContext) -> dg.MaterializeRe
     if not raw_data:
         raise Exception(f"No data returned for {newspaper} from {start_date} to {end_date}")
     process_and_save_data(raw_data, start_date[:-3], newspaper)
+
+    return dg.MaterializeResult(
+        metadata={"dagster/row_count": len(raw_data)},
+    )
 
 
 @dg.asset(
